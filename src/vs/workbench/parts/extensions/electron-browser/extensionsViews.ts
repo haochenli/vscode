@@ -40,6 +40,7 @@ import { ViewletPanel, IViewletPanelOptions } from 'vs/workbench/browser/parts/v
 import { IWorkspaceContextService } from 'vs/platform/workspace/common/workspace';
 import { distinct } from 'vs/base/common/arrays';
 import { IExperimentService, IExperiment, ExperimentActionType } from 'vs/workbench/parts/experiments/node/experimentService';
+import { alert } from 'vs/base/browser/ui/aria/aria';
 
 export class ExtensionsListView extends ViewletPanel {
 
@@ -178,6 +179,12 @@ export class ExtensionsListView extends ViewletPanel {
 		return TPromise.as(emptyModel);
 	}
 
+	private alertExtensionsFound(count: number) {
+		if (count > 0) {
+			alert(localize('extensionsFound', "{0} extensions found.", count));
+		}
+	}
+
 	private async queryLocal(query: Query, options: IQueryOptions): Promise<IPagedModel<IExtension>> {
 		let value = query.value;
 		if (/@builtin/i.test(value)) {
@@ -201,34 +208,32 @@ export class ExtensionsListView extends ViewletPanel {
 				.filter(e => e.type === LocalExtensionType.System && (e.name.toLowerCase().indexOf(value) > -1 || e.displayName.toLowerCase().indexOf(value) > -1));
 
 			if (showThemesOnly) {
-				const themesExtensions = result.filter(e => {
+				result = result.filter(e => {
 					return e.local.manifest
 						&& e.local.manifest.contributes
 						&& Array.isArray(e.local.manifest.contributes.themes)
 						&& e.local.manifest.contributes.themes.length;
 				});
-				return new PagedModel(this.sortExtensions(themesExtensions, options));
-			}
-			if (showBasicsOnly) {
-				const basics = result.filter(e => {
+			} else if (showBasicsOnly) {
+				result = result.filter(e => {
 					return e.local.manifest
 						&& e.local.manifest.contributes
 						&& Array.isArray(e.local.manifest.contributes.grammars)
 						&& e.local.manifest.contributes.grammars.length
 						&& e.local.identifier.id !== 'git';
 				});
-				return new PagedModel(this.sortExtensions(basics, options));
-			}
-			if (showFeaturesOnly) {
-				const others = result.filter(e => {
+			} else if (showFeaturesOnly) {
+				result = result.filter(e => {
 					return e.local.manifest
 						&& e.local.manifest.contributes
 						&& (!Array.isArray(e.local.manifest.contributes.grammars) || e.local.identifier.id === 'git')
 						&& !Array.isArray(e.local.manifest.contributes.themes);
 				});
-				return new PagedModel(this.sortExtensions(others, options));
 			}
 
+			if (value) {
+				this.alertExtensionsFound(result.length);
+			}
 			return new PagedModel(this.sortExtensions(result, options));
 		}
 
@@ -252,6 +257,9 @@ export class ExtensionsListView extends ViewletPanel {
 					&& (e.name.toLowerCase().indexOf(value) > -1 || e.displayName.toLowerCase().indexOf(value) > -1)
 					&& (!categories.length || categories.some(category => (e.local.manifest.categories || []).some(c => c.toLowerCase() === category))));
 
+			if (value) {
+				this.alertExtensionsFound(result.length);
+			}
 			return new PagedModel(this.sortExtensions(result, options));
 		}
 
@@ -266,6 +274,9 @@ export class ExtensionsListView extends ViewletPanel {
 					&& (extension.name.toLowerCase().indexOf(value) > -1 || extension.displayName.toLowerCase().indexOf(value) > -1)
 					&& (!categories.length || categories.some(category => extension.local.manifest.categories.some(c => c.toLowerCase() === category))));
 
+			if (value) {
+				this.alertExtensionsFound(result.length);
+			}
 			return new PagedModel(this.sortExtensions(result, options));
 		}
 
@@ -281,6 +292,9 @@ export class ExtensionsListView extends ViewletPanel {
 					&& (e.name.toLowerCase().indexOf(value) > -1 || e.displayName.toLowerCase().indexOf(value) > -1)
 					&& (!categories.length || categories.some(category => (e.local.manifest.categories || []).some(c => c.toLowerCase() === category))));
 
+			if (value) {
+				this.alertExtensionsFound(result.length);
+			}
 			return new PagedModel(this.sortExtensions(result, options));
 		}
 
@@ -297,6 +311,9 @@ export class ExtensionsListView extends ViewletPanel {
 					(!categories.length || categories.some(category => (e.local.manifest.categories || []).some(c => c.toLowerCase() === category)))
 				);
 
+			if (value) {
+				this.alertExtensionsFound(result.length);
+			}
 			return new PagedModel(this.sortExtensions(result, options));
 		}
 
@@ -598,7 +615,13 @@ export class ExtensionsListView extends ViewletPanel {
 			this.badge.setCount(count);
 
 			if (count === 0 && this.isVisible()) {
-				this.messageBox.textContent = isGalleryError ? localize('galleryError', "We cannot connect to the Extensions Marketplace at this time, please try again later.") : localize('no extensions found', "No extensions found.");
+				if (isGalleryError) {
+					const errorMessage = localize('galleryError', "We cannot connect to the Extensions Marketplace at this time, please try again later.");
+					alert(errorMessage);
+					this.messageBox.textContent = errorMessage;
+				} else {
+					this.messageBox.textContent = localize('no extensions found', "No extensions found.");
+				}
 			} else {
 				this.messageBox.textContent = '';
 			}
@@ -697,7 +720,15 @@ export class EnabledExtensionsView extends ExtensionsListView {
 	private readonly enabledExtensionsQuery = '@enabled';
 
 	async show(query: string): Promise<IPagedModel<IExtension>> {
-		return (query && query.trim() !== this.enabledExtensionsQuery) ? this.showEmptyModel() : super.show(this.enabledExtensionsQuery);
+		if (query && query.trim() !== this.enabledExtensionsQuery) {
+			return this.showEmptyModel();
+		}
+		return super.show(this.enabledExtensionsQuery).then(model => {
+			if (this.count() && this.isVisible()) {
+				alert(localize('enabledExtensionsFound', "{0} enabled extensions found."));
+			}
+			return model;
+		});
 	}
 }
 
@@ -705,25 +736,57 @@ export class DisabledExtensionsView extends ExtensionsListView {
 	private readonly disabledExtensionsQuery = '@disabled';
 
 	async show(query: string): Promise<IPagedModel<IExtension>> {
-		return (query && query.trim() !== this.disabledExtensionsQuery) ? this.showEmptyModel() : super.show(this.disabledExtensionsQuery);
+		if (query && query.trim() !== this.disabledExtensionsQuery) {
+			return this.showEmptyModel();
+		}
+		return super.show(this.disabledExtensionsQuery).then(model => {
+			if (this.count() && this.isVisible()) {
+				alert(localize('disabledExtensionsFound', "{0} disabled extensions found."));
+			}
+			return model;
+		});
 	}
 }
 
 export class BuiltInExtensionsView extends ExtensionsListView {
 	async show(query: string): Promise<IPagedModel<IExtension>> {
-		return (query && query.trim() !== '@builtin') ? this.showEmptyModel() : super.show('@builtin:features');
+		if (query && query.trim() !== '@builtin') {
+			return this.showEmptyModel();
+		}
+		return super.show('@builtin:features').then(model => {
+			if (this.count() && this.isVisible()) {
+				alert(localize('builtinFeaturesExtensionsFound', "{0} builtin feature extensions found."));
+			}
+			return model;
+		});
 	}
 }
 
 export class BuiltInThemesExtensionsView extends ExtensionsListView {
 	async show(query: string): Promise<IPagedModel<IExtension>> {
-		return (query && query.trim() !== '@builtin') ? this.showEmptyModel() : super.show('@builtin:themes');
+		if (query && query.trim() !== '@builtin') {
+			return this.showEmptyModel();
+		}
+		return super.show('@builtin:themes').then(model => {
+			if (this.count() && this.isVisible()) {
+				alert(localize('builtinThemesExtensionsFound', "{0} builtin theme extensions found."));
+			}
+			return model;
+		});
 	}
 }
 
 export class BuiltInBasicsExtensionsView extends ExtensionsListView {
 	async show(query: string): Promise<IPagedModel<IExtension>> {
-		return (query && query.trim() !== '@builtin') ? this.showEmptyModel() : super.show('@builtin:basics');
+		if (query && query.trim() !== '@builtin') {
+			return this.showEmptyModel();
+		}
+		return super.show('@builtin:basics').then(model => {
+			if (this.count() && this.isVisible()) {
+				alert(localize('builtinBasicsExtensionsFound', "{0} builtin basic language extensions found."));
+			}
+			return model;
+		});
 	}
 }
 
@@ -747,6 +810,9 @@ export class DefaultRecommendedExtensionsView extends ExtensionsListView {
 			// This is part of popular extensions view. Collapse if no installed extensions.
 			this.setExpanded(model.length > 0);
 		}
+		if (this.count() && this.isVisible()) {
+			alert(localize('recommendedExtensionsFound', "{0} recommended extensions found."));
+		}
 		return model;
 	}
 
@@ -764,7 +830,15 @@ export class RecommendedExtensionsView extends ExtensionsListView {
 	}
 
 	async show(query: string): Promise<IPagedModel<IExtension>> {
-		return (query && query.trim() !== this.recommendedExtensionsQuery) ? this.showEmptyModel() : super.show(this.recommendedExtensionsQuery);
+		if (query && query.trim() !== this.recommendedExtensionsQuery) {
+			return this.showEmptyModel();
+		}
+		return super.show(this.recommendedExtensionsQuery).then(model => {
+			if (this.count() && this.isVisible()) {
+				alert(localize('recommendedExtensionsFound', "{0} recommended extensions found."));
+			}
+			return model;
+		});
 	}
 }
 
@@ -807,6 +881,9 @@ export class WorkspaceRecommendedExtensionsView extends ExtensionsListView {
 		let shouldShowEmptyView = query && query.trim() !== '@recommended' && query.trim() !== '@recommended:workspace';
 		let model = await (shouldShowEmptyView ? this.showEmptyModel() : super.show(this.recommendedExtensionsQuery));
 		this.setExpanded(model.length > 0);
+		if (this.count() && this.isVisible()) {
+			alert(localize('workspaceRecommendedExtensionsFound', "{0} workspace recommended extensions found."));
+		}
 		return model;
 	}
 
